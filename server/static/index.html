@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hearth</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♿</text></svg>"/>
+<link rel="stylesheet" href="/leaflet.css"/>
+<style>
+:root {
+  --bg: #000000;
+  --surface: rgba(28, 28, 30, 0.72);
+  --surface-solid: #1c1c1e;
+  --elevated: rgba(44, 44, 46, 0.65);
+  --separator: rgba(84, 84, 88, 0.34);
+  --label-primary: #ffffff;
+  --label-secondary: rgba(235, 235, 245, 0.6);
+  --label-tertiary: rgba(235, 235, 245, 0.3);
+  --accent: #30d158;
+  --accent-dim: rgba(48, 209, 88, 0.15);
+  --orange: #ff9f0a;
+  --radius: 16px;
+  --radius-sm: 10px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+  background: var(--bg);
+  color: var(--label-primary);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* Floating panel — frosted glass */
+#panel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 320px;
+  z-index: 1000;
+  background: var(--surface);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-radius: var(--radius);
+  border: 1px solid var(--separator);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  animation: slideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-12px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Header */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+
+.panel-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.3s ease;
+}
+
+.badge-online {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.badge-offline {
+  background: rgba(142, 142, 147, 0.12);
+  color: rgba(142, 142, 147, 0.8);
+}
+
+/* Chair card */
+.chair-card {
+  background: var(--elevated);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  border: 1px solid var(--separator);
+  transition: transform 0.2s ease;
+}
+
+.chair-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--separator);
+}
+
+.chair-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent-dim), rgba(48, 209, 88, 0.05));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  position: relative;
+}
+
+.chair-avatar::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-solid);
+  transition: background 0.3s ease;
+}
+
+.avatar-online::after { background: var(--accent); }
+.avatar-offline::after { background: #636366; }
+
+.chair-info { flex: 1; }
+.chair-name { font-size: 15px; font-weight: 500; }
+.chair-id { font-size: 12px; color: var(--label-tertiary); margin-top: 1px; }
+
+/* Data grid */
+.data-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.data-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.data-cell.wide { grid-column: span 2; }
+
+.data-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--label-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.data-value {
+  font-size: 22px;
+  font-weight: 300;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+  transition: color 0.3s ease;
+}
+
+.data-value .unit {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--label-tertiary);
+  margin-left: 2px;
+}
+
+/* Status bar */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.status-ok {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.status-wait {
+  background: rgba(255, 159, 10, 0.1);
+  color: var(--orange);
+}
+
+.status-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.status-ok .status-pulse { background: var(--accent); }
+.status-wait .status-pulse { background: var(--orange); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* Leaflet overrides for dark theme */
+.leaflet-control-zoom a {
+  background: var(--surface) !important;
+  backdrop-filter: blur(10px) !important;
+  color: var(--label-primary) !important;
+  border-color: var(--separator) !important;
+}
+
+.leaflet-control-attribution {
+  background: var(--surface) !important;
+  backdrop-filter: blur(10px) !important;
+  color: var(--label-tertiary) !important;
+  border-radius: 6px !important;
+  padding: 2px 6px !important;
+  font-size: 10px !important;
+}
+
+.leaflet-control-attribution a { color: var(--label-secondary) !important; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="panel">
+  <div class="panel-header">
+    <span class="panel-title">Hearth</span>
+    <span class="panel-badge badge-offline" id="badge">离线</span>
+  </div>
+
+  <div class="chair-card">
+    <div class="chair-header">
+      <div class="chair-avatar avatar-offline" id="avatar">♿</div>
+      <div class="chair-info">
+        <div class="chair-name" id="chair-name">轮椅 01</div>
+        <div class="chair-id">chair-01</div>
+      </div>
+    </div>
+
+    <div class="data-grid">
+      <div class="data-cell">
+        <span class="data-label">纬度</span>
+        <span class="data-value" id="lat">—</span>
+      </div>
+      <div class="data-cell">
+        <span class="data-label">经度</span>
+        <span class="data-value" id="lon">—</span>
+      </div>
+      <div class="data-cell">
+        <span class="data-label">速度</span>
+        <span class="data-value" id="speed">—<span class="unit">km/h</span></span>
+      </div>
+      <div class="data-cell">
+        <span class="data-label">行程</span>
+        <span class="data-value" id="distance">—<span class="unit">km</span></span>
+      </div>
+      <div class="data-cell wide">
+        <span class="data-label">更新时间</span>
+        <span class="data-value" id="time" style="font-size:16px">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="status-bar status-wait" id="status">
+    <span class="status-pulse"></span>
+    <span>等待数据…</span>
+  </div>
+</div>
+
+<script src="/leaflet.js"></script>
+<script>
+(async () => {
+
+const map = L.map('map', { zoomControl: false }).setView([30.5728, 104.0668], 15);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+  subdomains: '1234',
+  attribution: '© 高德地图'
+}).addTo(map);
+
+const icon = L.divIcon({
+  html: `<div style="
+    width: 20px; height: 20px;
+    background: #30d158;
+    border: 3px solid rgba(255,255,255,0.9);
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(48,209,88,0.5), 0 0 0 4px rgba(48,209,88,0.15);
+  "></div>`,
+  iconSize: [20, 20], iconAnchor: [10, 10], className: ''
+});
+
+let marker = null;
+const trail = [];
+let polyline = L.polyline([], {
+  color: '#30d158',
+  weight: 3,
+  opacity: 0.6,
+  smoothFactor: 1.5,
+  lineCap: 'round'
+}).addTo(map);
+
+// Load full trail history from server
+try {
+  const res = await fetch('/api/trail');
+  const data = await res.json();
+  for (const pt of data.trail) {
+    trail.push(pt);
+  }
+  if (trail.length > 0) {
+    polyline.setLatLngs(trail);
+    map.setView(trail[trail.length - 1], 15);
+  }
+} catch (_) {}
+
+const es = new EventSource('/events');
+es.onmessage = (e) => {
+  const p = JSON.parse(e.data);
+
+  document.getElementById('lat').textContent = p.lat.toFixed(6);
+  document.getElementById('lon').textContent = p.lon.toFixed(6);
+  document.getElementById('speed').innerHTML = p.speed_kmh.toFixed(1) + '<span class="unit">km/h</span>';
+
+  const d = p.total_distance_km;
+  if (d < 1) {
+    document.getElementById('distance').innerHTML = (d * 1000).toFixed(0) + '<span class="unit">m</span>';
+  } else {
+    document.getElementById('distance').innerHTML = d.toFixed(2) + '<span class="unit">km</span>';
+  }
+
+  const ts = p.timestamp;
+  const now = new Date();
+  const fmt = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  document.getElementById('time').textContent = fmt;
+
+  const latlng = [p.lat, p.lon];
+  if (!marker) {
+    marker = L.marker(latlng, { icon }).addTo(map);
+    if (trail.length === 0) map.setView(latlng, 15);
+  } else {
+    marker.setLatLng(latlng);
+  }
+
+  trail.push(latlng);
+  polyline.setLatLngs(trail);
+
+  const status = document.getElementById('status');
+  status.className = 'status-bar status-ok';
+  status.innerHTML = '<span class="status-pulse"></span><span>实时接收中</span>';
+};
+
+es.onerror = () => {
+  const status = document.getElementById('status');
+  status.className = 'status-bar status-wait';
+  status.innerHTML = '<span class="status-pulse"></span><span>连接断开，重连中…</span>';
+};
+
+async function pollWheelchair() {
+  try {
+    const res = await fetch('/api/wheelchair');
+    const chair = await res.json();
+    document.getElementById('chair-name').textContent = chair.name;
+
+    const badge = document.getElementById('badge');
+    const avatar = document.getElementById('avatar');
+
+    if (chair.online) {
+      badge.className = 'panel-badge badge-online';
+      badge.textContent = '在线';
+      avatar.className = 'chair-avatar avatar-online';
+    } else {
+      badge.className = 'panel-badge badge-offline';
+      badge.textContent = '离线';
+      avatar.className = 'chair-avatar avatar-offline';
+    }
+  } catch (_) {}
+}
+pollWheelchair();
+setInterval(pollWheelchair, 3000);
+
+})();
+</script>
+</body>
+</html>

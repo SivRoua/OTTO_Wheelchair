@@ -1,0 +1,7 @@
+target/
+*.db
+*.img
+*.iso
+build-lfs/
+server/lora/DX-LR22-433T22D*/
+.claude/
