@@ -1,125 +1,71 @@
 use crate::motor::{Dir, MotorCommand};
 use stm32f1xx_hal::{
-    gpio::{Alternate, Floating, Input, Pin, PushPull},
-    pac::USART1,
+    gpio::{Alternate, OpenDrain, Pin},
+    pac::I2C1,
     rcc::Rcc,
 };
 
-enum State {
-    Idle,
-    WaitingByte2,
-    WaitingFlag,
-    WaitingChecksum,
-    WaitingEndE,
-    WaitingEndD,
-}
+const SLAVE_ADDR: u8 = 0x42;
 
 pub struct Protocol {
-    usart: USART1,
-    _tx: Pin<'A', 9, Alternate<PushPull>>,
-    _rx: Pin<'A', 10, Input<Floating>>,
-    state: State,
-    flag: u8,
-    checksum: u8,
+    i2c: I2C1,
+    _scl: Pin<'B', 6, Alternate<OpenDrain>>,
+    _sda: Pin<'B', 7, Alternate<OpenDrain>>,
 }
 
 impl Protocol {
     pub fn new(
-        usart: USART1,
-        tx_pin: Pin<'A', 9, Alternate<PushPull>>,
-        rx_pin: Pin<'A', 10, Input<Floating>>,
+        i2c: I2C1,
+        scl: Pin<'B', 6, Alternate<OpenDrain>>,
+        sda: Pin<'B', 7, Alternate<OpenDrain>>,
         rcc: &mut Rcc,
     ) -> Self {
-        // Enable USART1 clock on APB2
-        rcc.apb2enr().modify(|_, w| w.usart1en().set_bit());
+        rcc.apb1enr().modify(|_, w| w.i2c1en().set_bit());
+        rcc.apb1rstr().modify(|_, w| w.i2c1rst().set_bit());
+        rcc.apb1rstr().modify(|_, w| w.i2c1rst().clear_bit());
 
-        // BRR for 115200 @ 64 MHz PCLK2: round(64_000_000 / 115_200) = 556 = 0x022C
-        usart.brr().write(|w| unsafe { w.bits(0x022C) });
-        // 8-N-1, UE=1, TE=1, RE=1
-        usart.cr1().write(|w| w.ue().set_bit().te().set_bit().re().set_bit());
+        i2c.cr2().write(|w| unsafe { w.freq().bits(32) }); // PCLK1 = 32 MHz
+        i2c.oar1().write(|w| unsafe { w.bits((SLAVE_ADDR as u16) << 1) });
+        i2c.cr1().write(|w| w.pe().set_bit().ack().set_bit());
 
-        Self {
-            usart,
-            _tx: tx_pin,
-            _rx: rx_pin,
-            state: State::Idle,
-            flag: 0,
-            checksum: 0,
-        }
+        Self { i2c, _scl: scl, _sda: sda }
     }
 
     pub fn next_command(&mut self) -> Result<MotorCommand, ()> {
         loop {
-            let sr = self.usart.sr().read();
-            if sr.ore().bit_is_set() || sr.fe().bit_is_set() {
-                let _ = self.usart.dr().read();
-                continue;
-            }
-            if sr.rxne().bit_is_set() {
-                let byte = self.usart.dr().read().dr().bits() as u8;
-                if let Some(result) = self.feed(byte) {
-                    return result;
-                }
-            }
-        }
-    }
+            // Wait for address match, then clear ADDR (read SR1 then SR2)
+            while self.i2c.sr1().read().addr().bit_is_clear() {}
+            let _ = self.i2c.sr1().read();
+            let _ = self.i2c.sr2().read();
 
-    fn feed(&mut self, byte: u8) -> Option<Result<MotorCommand, ()>> {
-        match self.state {
-            State::Idle => {
-                if byte == b'S' {
-                    self.state = State::WaitingByte2;
-                }
+            // Receive 6-byte frame
+            let mut frame = [0u8; 6];
+            for byte in frame.iter_mut() {
+                while self.i2c.sr1().read().rx_ne().bit_is_clear() {}
+                *byte = self.i2c.dr().read().bits() as u8;
             }
-            State::WaitingByte2 => {
-                self.state = if byte == b'T' {
-                    self.checksum = b'S' ^ b'T';
-                    State::WaitingFlag
-                } else {
-                    State::Idle
-                };
-            }
-            State::WaitingFlag => {
-                self.flag = byte;
-                self.checksum ^= byte;
-                self.state = State::WaitingChecksum;
-            }
-            State::WaitingChecksum => {
-                self.checksum ^= byte;
-                self.state = State::WaitingEndE;
-            }
-            State::WaitingEndE => {
-                self.state = if byte == b'E' {
-                    State::WaitingEndD
-                } else {
-                    State::Idle
-                };
-            }
-            State::WaitingEndD => {
-                self.state = State::Idle;
-                if byte == b'D' {
-                    if self.checksum == 0 {
-                        self.write(b"OK");
-                        return Some(Ok(MotorCommand {
-                            step_motor: Self::decode(self.flag >> 6),
-                            left_motor: Self::decode(self.flag >> 4),
-                            right_motor: Self::decode(self.flag >> 2),
-                        }));
-                    }
-                    self.write(b"Err");
-                    return Some(Err(()));
-                }
-            }
-        }
-        None
-    }
 
-    fn write(&mut self, data: &[u8]) {
-        for &b in data {
-            while self.usart.sr().read().txe().bit_is_clear() {}
-            self.usart.dr().write(|w| unsafe { w.dr().bits(b as u16) });
+            // Wait for STOP, then clear STOPF (read SR1, write CR1)
+            while self.i2c.sr1().read().stopf().bit_is_clear() {}
+            let _ = self.i2c.sr1().read();
+            self.i2c.cr1().write(|w| w.pe().set_bit().ack().set_bit());
+
+            // Validate: S T flag cs E D
+            if frame[0] == b'S'
+                && frame[1] == b'T'
+                && frame[4] == b'E'
+                && frame[5] == b'D'
+                && b'S' ^ b'T' ^ frame[2] ^ frame[3] == 0
+            {
+                return Ok(MotorCommand {
+                    step_motor: Self::decode(frame[2] >> 6),
+                    left_motor: Self::decode(frame[2] >> 4),
+                    right_motor: Self::decode(frame[2] >> 2),
+                });
+            } else {
+                return Err(());
+            }
         }
-        while self.usart.sr().read().tc().bit_is_clear() {}
     }
 
     fn decode(bits: u8) -> Dir {

@@ -13,7 +13,6 @@ use stm32f1xx_hal::{
     pac,
     prelude::*,
     rcc::Config as RccConfig,
-    time::U32Ext,
 };
 use {defmt_rtt as _, panic_probe as _};
 
@@ -52,20 +51,21 @@ fn main() -> ! {
     let pa2 = gpioa.pa2.into_push_pull_output_with_state(&mut gpioa.crl, PinState::Low);
     let pa3 = gpioa.pa3.into_push_pull_output_with_state(&mut gpioa.crl, PinState::Low);
 
-    // USART1: PA9(TX), PA10(RX)
-    let tx_pin = gpioa.pa9.into_alternate_push_pull(&mut gpioa.crh);
-    let rx_pin = gpioa.pa10;
+    // USART1: PA9(TX), PA10(RX) — removed, using I2C1 instead
 
-    // GPIOB: TB6612
+    // GPIOB: TB6612 + I2C1
     let mut gpiob = dp.GPIOB.split(&mut rcc);
     let a_in1 = gpiob.pb14.into_push_pull_output_with_state(&mut gpiob.crh, PinState::Low);
     let a_in2 = gpiob.pb15.into_push_pull_output_with_state(&mut gpiob.crh, PinState::Low);
     let b_in1 = gpiob.pb13.into_push_pull_output_with_state(&mut gpiob.crh, PinState::Low);
     let b_in2 = gpiob.pb12.into_push_pull_output_with_state(&mut gpiob.crh, PinState::Low);
+    // I2C1: PB6(SCL), PB7(SDA) — alternate open-drain
+    let scl = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
+    let sda = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
 
     let mut motors = Motors::new(pa0, pa1, pa2, pa3, a_in1, a_in2, b_in1, b_in2);
 
-    let mut protocol = Protocol::new(dp.USART1, tx_pin, rx_pin, &mut rcc);
+    let mut protocol = Protocol::new(dp.I2C1, scl, sda, &mut rcc);
 
     info!("Ready.");
 
