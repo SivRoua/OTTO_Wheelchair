@@ -9,7 +9,7 @@ Omnidirectional Tracking Telemonitoring Orthosis — 全向追踪与远程监护
 ```
 OTTO_Wheelchair/
 ├── hardware/
-│   ├── PCB/          # KiCad 工程文件（待同步）
+│   ├── PCB/          # 嘉立创EDA 工程文件
 │   └── model/        # 3D 模型文件（待同步）
 ├── main-board/       # 主板固件，ESP32-S3（Tinzen 编写，待同步）
 ├── sub-board/        # 副板固件，STM32F103C8（Rust + stm32f1xx-hal）
