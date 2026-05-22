@@ -4,7 +4,7 @@ use tokio::sync::{broadcast, RwLock};
 use tokio_serial::SerialPortBuilderExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use sqlx::SqlitePool;
-use crate::gps::{GpsPoint, parse_gprmc};
+use crate::gps::{GpsPoint, parse_nmea};
 use crate::wheelchair::Wheelchair;
 
 /// Find a usable serial port: try udev symlink, then scan ttyACM/ttyUSB
@@ -57,7 +57,7 @@ pub async fn run_serial(
                     match lines.next_line().await {
                         Ok(Some(line)) => {
                             tracing::info!("RAW: {}", line);
-                            if let Some(mut point) = parse_gprmc(&line) {
+                            if let Some(mut point) = parse_nmea(&line) {
                                 tracing::debug!("GPS: {:.6},{:.6}", point.lat, point.lon);
 
                                 {

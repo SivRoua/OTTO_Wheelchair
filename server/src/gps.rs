@@ -10,31 +10,22 @@ pub struct GpsPoint {
     pub total_distance_km: f64,
 }
 
-// Parse $GPRMC sentence, returns None if invalid or no fix
+pub fn parse_nmea(line: &str) -> Option<GpsPoint> {
+    parse_gprmc(line).or_else(|| parse_gga(line))
+}
+
+// $GPRMC / $GNRMC
 pub fn parse_gprmc(line: &str) -> Option<GpsPoint> {
     let line = line.trim();
     if !line.starts_with("$GPRMC") && !line.starts_with("$GNRMC") {
         return None;
     }
-
-    // Verify checksum
-    if let Some(star) = line.rfind('*') {
-        let body = &line[1..star];
-        let cs_str = &line[star + 1..];
-        let expected: u8 = cs_str.trim().parse::<u8>().ok()
-            .or_else(|| u8::from_str_radix(cs_str.trim(), 16).ok())?;
-        let actual: u8 = body.bytes().fold(0u8, |acc, b| acc ^ b);
-        if actual != expected {
-            return None;
-        }
-    }
+    verify_checksum(line)?;
 
     let fields: Vec<&str> = line.split(',').collect();
     if fields.len() < 8 {
         return None;
     }
-
-    // Field 2: status A=active, V=void
     if fields[2] != "A" {
         return None;
     }
@@ -47,7 +38,39 @@ pub fn parse_gprmc(line: &str) -> Option<GpsPoint> {
     Some(GpsPoint { lat, lon, speed_knots, speed_kmh: 0.0, timestamp, total_distance_km: 0.0 })
 }
 
-// Convert NMEA ddmm.mmmm + N/S/E/W to decimal degrees
+// $GPGGA / $GNGGA
+fn parse_gga(line: &str) -> Option<GpsPoint> {
+    let line = line.trim();
+    if !line.starts_with("$GPGGA") && !line.starts_with("$GNGGA") {
+        return None;
+    }
+    verify_checksum(line)?;
+
+    let fields: Vec<&str> = line.split(',').collect();
+    if fields.len() < 6 {
+        return None;
+    }
+    // Field 6: fix quality — 0 = no fix
+    if fields[6] == "0" || fields[6].is_empty() {
+        return None;
+    }
+
+    let lat = parse_nmea_coord(fields[2], fields[3])?;
+    let lon = parse_nmea_coord(fields[4], fields[5])?;
+    let timestamp = fields[1].to_string();
+
+    Some(GpsPoint { lat, lon, speed_knots: 0.0, speed_kmh: 0.0, timestamp, total_distance_km: 0.0 })
+}
+
+fn verify_checksum(line: &str) -> Option<()> {
+    let star = line.rfind('*')?;
+    let body = &line[1..star];
+    let cs_str = line[star + 1..].trim();
+    let expected = u8::from_str_radix(cs_str, 16).ok()?;
+    let actual = body.bytes().fold(0u8, |acc, b| acc ^ b);
+    if actual == expected { Some(()) } else { None }
+}
+
 fn parse_nmea_coord(value: &str, dir: &str) -> Option<f64> {
     if value.is_empty() {
         return None;
