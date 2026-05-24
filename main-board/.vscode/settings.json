@@ -1,0 +1,15 @@
+{
+  "idf.currentSetup": "C:\\Users\\30442\\software\\ESP\\IDF\\.espressif\\v6.0.1\\esp-idf",
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "/home/cuber/.espressif/tools/esp-clang/esp-20.1.1_20250829/esp-clang/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=/home/cuber/code/my_new_project/build"
+  ],
+  "idf.flashType": "UART",
+  "idf.port": "/dev/ttyS3",
+  "idf.portWin": "COM6"
+}

@@ -5,3 +5,8 @@ target/
 build-lfs/
 server/lora/DX-LR22-433T22D*/
 .claude/
+main-board/build
+main-board/.clangd
+main-board/chat_export*
+main-board/sdkconfig.old
+main-board/session*
