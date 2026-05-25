@@ -1,15 +1,13 @@
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
-use tokio_serial::SerialPortBuilderExt;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use std::time::Duration;
+use tokio::sync::{broadcast, mpsc, RwLock};
 use sqlx::SqlitePool;
 use crate::gps::{GpsPoint, parse_nmea};
 use crate::wheelchair::Wheelchair;
 
-/// Find a usable serial port: try udev symlink, then scan ttyACM/ttyUSB
 fn find_port() -> Option<String> {
-    // Prefer udev symlink
     let fixed = ["/dev/ttyLeonardo", "/dev/serial/by-id/usb-Arduino"];
     for path in &fixed {
         if Path::new(path).exists() {
@@ -17,8 +15,6 @@ fn find_port() -> Option<String> {
             return Some(path.to_string());
         }
     }
-
-    // Scan /dev/ttyACM* then /dev/ttyUSB*
     for prefix in &["ttyACM", "ttyUSB"] {
         if let Ok(entries) = std::fs::read_dir("/dev") {
             for entry in entries.flatten() {
@@ -31,7 +27,6 @@ fn find_port() -> Option<String> {
             }
         }
     }
-
     None
 }
 
@@ -49,57 +44,71 @@ pub async fn run_serial(
         });
 
         tracing::info!("Opening serial port {}", port);
-        match tokio_serial::new(&port, baud).open_native_async() {
-            Ok(serial) => {
-                let reader = BufReader::new(serial);
-                let mut lines = reader.lines();
-                loop {
-                    match lines.next_line().await {
-                        Ok(Some(line)) => {
-                            tracing::info!("RAW: {}", line);
-                            if let Some(mut point) = parse_nmea(&line) {
-                                tracing::debug!("GPS: {:.6},{:.6}", point.lat, point.lon);
+        let serial = match serialport::new(&port, baud)
+            .timeout(Duration::from_millis(500))
+            .open()
+        {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("Cannot open {}: {}", port, e);
+                wheelchair.write().await.online = false;
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                continue;
+            }
+        };
 
-                                {
-                                    let mut chair = wheelchair.write().await;
-                                    chair.update(point.lat, point.lon, point.speed_knots);
-                                    point.total_distance_km = chair.total_distance_km;
-                                    point.speed_kmh = chair.current_speed_kmh;
-                                }
+        let mut reader = BufReader::new(serial);
+        let (line_tx, mut line_rx) = mpsc::channel::<String>(64);
 
-                                let chair_id = {
-                                    wheelchair.read().await.id.clone()
-                                };
-                                crate::db::insert_point(
-                                    &db,
-                                    &chair_id,
-                                    point.lat,
-                                    point.lon,
-                                    point.speed_knots,
-                                    &point.timestamp,
-                                ).await;
-
-                                let _ = tx.send(point);
-                            }
-                        }
-                        Ok(None) => {
-                            tracing::warn!("Serial port EOF");
-                            break;
-                        }
-                        Err(e) => {
-                            tracing::warn!("Serial read error: {}", e);
+        // Sync I/O in a blocking thread — tokio-serial panics on USB unplug
+        tokio::task::spawn_blocking(move || {
+            let mut buf = String::new();
+            loop {
+                buf.clear();
+                match reader.read_line(&mut buf) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        if line_tx.blocking_send(buf.clone()).is_err() {
                             break;
                         }
                     }
+                    Err(e) => {
+                        tracing::warn!("Serial read error: {}", e);
+                        break;
+                    }
                 }
             }
-            Err(e) => {
-                tracing::warn!("Cannot open {}: {}", port, e);
+        });
+
+        while let Some(line) = line_rx.recv().await {
+            let line = line.trim().to_string();
+            if line.is_empty() {
+                continue;
+            }
+            tracing::info!("RAW: {}", line);
+
+            if let Some(mut point) = parse_nmea(&line) {
+                tracing::debug!("GPS: {:.6},{:.6}", point.lat, point.lon);
+
+                {
+                    let mut chair = wheelchair.write().await;
+                    chair.update(point.lat, point.lon, point.speed_knots);
+                    point.total_distance_km = chair.total_distance_km;
+                    point.speed_kmh = chair.current_speed_kmh;
+                }
+
+                let chair_id = { wheelchair.read().await.id.clone() };
+                crate::db::insert_point(
+                    &db, &chair_id, point.lat, point.lon,
+                    point.speed_knots, &point.timestamp,
+                ).await;
+
+                let _ = tx.send(point);
             }
         }
 
-        // Mark offline while disconnected
+        // spawn_blocking thread exited → port disconnected
         wheelchair.write().await.online = false;
-        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
     }
 }
