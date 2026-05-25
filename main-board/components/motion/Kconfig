@@ -1,0 +1,22 @@
+menu "Motion Control"
+
+config MOTION_I2C_PORT
+    int "I2C port number"
+    default 0
+    range 0 1
+    help
+        I2C port connected to sub-board (0x42).
+
+config MOTION_SDA_PIN
+    int "SDA GPIO pin"
+    default 38
+    help
+        GPIO pin for I2C SDA to sub-board PB7.
+
+config MOTION_SCL_PIN
+    int "SCL GPIO pin"
+    default 47
+    help
+        GPIO pin for I2C SCL to sub-board PB6.
+
+endmenu
