@@ -1,3 +1,4 @@
+mod coord;
 mod db;
 mod gps;
 mod serial;

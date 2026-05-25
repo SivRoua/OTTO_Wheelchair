@@ -11,7 +11,12 @@ pub struct GpsPoint {
 }
 
 pub fn parse_nmea(line: &str) -> Option<GpsPoint> {
-    parse_gprmc(line).or_else(|| parse_gga(line))
+    parse_gprmc(line).or_else(|| parse_gga(line)).map(|mut p| {
+        let (gcj_lat, gcj_lon) = crate::coord::wgs84_to_gcj02(p.lat, p.lon);
+        p.lat = gcj_lat;
+        p.lon = gcj_lon;
+        p
+    })
 }
 
 // $GPRMC / $GNRMC

@@ -36,7 +36,8 @@ OTTO_Wheelchair/
 服务端 (Wyse 5070)
   hearth (Rust)
     ├─ 串口自动探测 ttyUSB*/ttyACM*
-    ├─ $GPRMC/$GNRMC 解析 + 校验和验证
+    ├─ $GPRMC/$GNRMC/$GPGGA/$GNGGA 解析 + 校验和验证
+    ├─ WGS84 → GCJ-02 火星坐标转换（适配国内地图）
     ├─ Haversine 累计里程 + 速度计算
     ├─ SQLite 轨迹持久化
     ├─ SSE /events 实时推送
