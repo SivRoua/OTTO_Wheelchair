@@ -1,0 +1,37 @@
+menu "LCD12864 Configuration"
+    config LCD12864_PIN_SCLK
+        int "SCLK Pin"
+        default 1
+        help
+            GPIO number for SPI clock (SCLK).
+
+    config LCD12864_PIN_SDA
+        int "SDA (MOSI) Pin"
+        default 2
+        help
+            GPIO number for SPI data (MOSI).
+
+    config LCD12864_PIN_RS
+        int "RS (DC) Pin"
+        default 3
+        help
+            GPIO number for Register/Data selection (DC/A0).
+
+    config LCD12864_PIN_CS
+        int "CS Pin"
+        default 5
+        help
+            GPIO number for Chip Select (CS). Active low.
+
+    config LCD12864_PIN_RESET
+        int "RESET Pin"
+        default 4
+        help
+            GPIO number for Reset (RST). Active low.
+
+    config LCD12864_SPI_CLOCK_HZ
+        int "SPI Clock Speed (Hz)"
+        default 1000000
+        help
+            SPI clock frequency in Hz. Typical values: 1000000 (1 MHz), 4000000 (4 MHz).
+endmenu
