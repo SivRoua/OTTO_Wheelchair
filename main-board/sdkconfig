@@ -647,7 +647,7 @@ CONFIG_IDF_TARGET_ARCH="xtensa"
 # default:
 CONFIG_IDF_TARGET="esp32s3"
 # default:
-CONFIG_IDF_INIT_VERSION="$IDF_INIT_VERSION"
+CONFIG_IDF_INIT_VERSION="6.0.1"
 # default:
 CONFIG_IDF_TARGET_ESP32S3=y
 # default:
@@ -3602,6 +3602,36 @@ CONFIG_WL_SECTOR_SIZE_4096=y
 # default:
 CONFIG_WL_SECTOR_SIZE=4096
 # end of Wear Levelling
+
+#
+# Button GPIO Configuration
+#
+# default:
+CONFIG_BUTTON_GPIO_UP=7
+# default:
+CONFIG_BUTTON_GPIO_DOWN=8
+# default:
+CONFIG_BUTTON_GPIO_LEFT=9
+# default:
+CONFIG_BUTTON_GPIO_RIGHT=10
+# default:
+CONFIG_BUTTON_GPIO_CENTER=11
+# end of Button GPIO Configuration
+
+#
+# IoT Button
+#
+# default:
+CONFIG_BUTTON_PERIOD_TIME_MS=5
+# default:
+CONFIG_BUTTON_DEBOUNCE_TICKS=2
+# default:
+CONFIG_BUTTON_SHORT_PRESS_TIME_MS=50
+# default:
+CONFIG_BUTTON_LONG_PRESS_TIME_MS=1000
+# default:
+CONFIG_BUTTON_LONG_PRESS_HOLD_SERIAL_TIME_MS=20
+# end of IoT Button
 
 #
 # LCD12864 Configuration
