@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "esp_err.h"
 #include "esp_log.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
@@ -38,16 +39,16 @@ static int cs_pin, rs_pin, reset_pin; /* 保存实际使用的 GPIO 编号 */
  * 片选和指令/数据选择，这些由上层 write_cmd / write_data 控制。
  */
 static void spi_transfer_byte(uint8_t data) {
-    /*
-     * SPI 事务结构体。.length 表示传输位数，此处为 8 位。
-     * .tx_buffer 指向发送缓冲区。若数据在函数栈上，必须确保
-     * 事务完成前该地址有效。这里直接使用形参 data 的地址，
-     * 因为 poll 模式会立即完成传输，无需担心生命周期。
-     */
-    spi_transaction_t trans = {
-        .length = 8,
-        .tx_buffer = &data,
-    };
+    spi_transaction_t trans;
+    // 1. 使用 memset 彻底清空结构体，这是 ESP-IDF 的安全标准写法
+    memset(&trans, 0, sizeof(spi_transaction_t)); 
+    
+    // 2. 赋值
+    trans.flags = SPI_TRANS_USE_TXDATA; 
+    trans.length = 8;                   
+    trans.tx_data[0] = data;           
+    
+    // 3. 传输
     spi_device_polling_transmit(spi_handle, &trans);
 }
 
@@ -157,15 +158,12 @@ static void esp_port_write_data_bulk(const uint8_t *data, uint32_t len) {
     gpio_set_level(cs_pin, 0);
     gpio_set_level(rs_pin, 1);   /* 数据模式 */
 
-    /*
-     * 构造一次 SPI 事务，发送全部 len 字节。
-     * .length 单位为位，因此需要乘以 8。
-     * .tx_buffer 指向待发送的数据缓冲区。
-     */
-    spi_transaction_t trans = {
-        .length = len * 8,
-        .tx_buffer = data,
-    };
+    spi_transaction_t trans;
+    // 同样使用 memset 确保 bulk 发送时的安全性
+    memset(&trans, 0, sizeof(spi_transaction_t));
+    trans.length = len * 8;
+    trans.tx_buffer = data;
+
     spi_device_polling_transmit(spi_handle, &trans);
 
     gpio_set_level(cs_pin, 1);

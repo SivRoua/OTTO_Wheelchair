@@ -1,0 +1,63 @@
+menu "Button GPIO Configuration"
+
+    config BUTTON_GPIO_UP
+        int "UP button GPIO"
+        range 0 48
+        default 7
+
+    config BUTTON_GPIO_DOWN
+        int "DOWN button GPIO"
+        range 0 48
+        default 8
+
+    config BUTTON_GPIO_LEFT
+        int "LEFT button GPIO"
+        range 0 48
+        default 9
+
+    config BUTTON_GPIO_RIGHT
+        int "RIGHT button GPIO"
+        range 0 48
+        default 10
+
+    config BUTTON_GPIO_CENTER
+        int "CENTER button GPIO"
+        range 0 48
+        default 11
+
+endmenu
+
+menu "IoT Button"
+
+    config BUTTON_PERIOD_TIME_MS
+        int "BUTTON PERIOD TIME (MS)"
+        range 2 500
+        default 5
+        help
+            "Button scan interval"
+
+    config BUTTON_DEBOUNCE_TICKS
+        int "BUTTON DEBOUNCE TICKS"
+        range 1 7
+        default 2
+        help
+            "One CONFIG_BUTTON_DEBOUNCE_TICKS equal to CONFIG_BUTTON_PERIOD_TIME_MS"
+
+    config BUTTON_SHORT_PRESS_TIME_MS
+        int "BUTTON SHORT PRESS TIME (MS)"
+        range 50 800
+        default 50
+
+    config BUTTON_LONG_PRESS_TIME_MS
+        int "BUTTON LONG PRESS TIME (MS)"
+        range 500 5000
+        default 1000
+
+    config BUTTON_LONG_PRESS_HOLD_SERIAL_TIME_MS
+        int "BUTTON LONG_PRESS_HOLD SERIAL TIME (MS)"
+        range 2 1000
+        default 20
+        help
+            "Long press hold Serial trigger interval"
+
+endmenu
