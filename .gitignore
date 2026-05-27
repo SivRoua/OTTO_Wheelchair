@@ -10,3 +10,4 @@ main-board/.clangd
 main-board/chat_export*
 main-board/sdkconfig.old
 main-board/session*
+main-board/.cache
