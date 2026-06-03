@@ -1,0 +1,10 @@
+menu "Buzzer Configuration"
+
+    config BUZZER_GPIO_PIN
+        int "Buzzer GPIO pin"
+        range 0 48
+        default 6
+        help
+            GPIO pin connected to the buzzer. Active low.
+
+endmenu
