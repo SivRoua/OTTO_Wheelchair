@@ -9,13 +9,13 @@ config MOTION_I2C_PORT
 
 config MOTION_SDA_PIN
     int "SDA GPIO pin"
-    default 38
+    default 21
     help
         GPIO pin for I2C SDA to sub-board PB7.
 
 config MOTION_SCL_PIN
     int "SCL GPIO pin"
-    default 47
+    default 40
     help
         GPIO pin for I2C SCL to sub-board PB6.
 

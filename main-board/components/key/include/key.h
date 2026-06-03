@@ -31,6 +31,8 @@ typedef enum {
     KEY_PRESS_SHORT = 0,  /* 单击：按下后抬起，时长 < long_press_time */
     KEY_PRESS_LONG,       /* 长按开始：持续超过阈值时触发一次 */
     KEY_PRESS_HOLD,       /* 长按持续：按住期间以固定间隔周期性触发 */
+    KEY_PRESS_DOWN,       /* 按下瞬间触发 */
+    KEY_PRESS_MAX,
 } key_press_t;
 
 /* ---------- 事件 ---------- */

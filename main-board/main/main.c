@@ -1,159 +1,229 @@
-/*
- * main/my_new_project.c
- *
- * LoRa 周期发送（每 1s）
- * ------------------------------------------------
- * 将固定的 GPS NMEA 坐标数据通过 LoRa 透明传输发送出去。
- * 发送内容（按用户要求）：
- *   $GPRMC,093809.000,A,3344.8260,N,11312.5340,E,0.0,0.0,220526,,,A*6A
- *
- * 引脚：
- *   LCD: Kconfig 配置（用于简单状态提示，可删除）
- *   LoRa: UART_BUS_NUM_2, TX=10, RX=11, 9600, AUX=12
- */
-
-#include <stdio.h>
-#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
+#include "esp_err.h"
+#include "esp_log.h"
+
 #include "lcd12864.h"
-#include "gfx_ui.h"
-#include "LoRa.h"
+#include "lcd_hal.h"
+#include "gfx_menu.h"
+#include "motion.h"
+#include "key.h"
+#include "buzzer.h"
+#include "ld2402.h"
+#include "gps.h"
+#include "uart_bus.h"
 
-#define PIN_SCLK   CONFIG_LCD12864_PIN_SCLK
-#define PIN_SDA    CONFIG_LCD12864_PIN_SDA
-#define PIN_RS     CONFIG_LCD12864_PIN_RS
-#define PIN_CS     CONFIG_LCD12864_PIN_CS
-#define PIN_RESET  CONFIG_LCD12864_PIN_RESET
-#define SPI_FREQ   CONFIG_LCD12864_SPI_CLOCK_HZ
+#include "app_ctx.h"
+#include "page_main.h"
+#include "page_menu.h"
+#include "page_sub.h"
 
-#define LORA_AUX_PIN    12
-#define LORA_UART_NUM   UART_BUS_NUM_2
-#define LORA_TX_PIN     10
-#define LORA_RX_PIN     11
-#define LORA_BAUD       9600
+static const char *TAG = "main";
 
-static const char *GPS_GPRMC_SENTENCE =
-    "$GNGGA,111827.000,3345.04155,N,11312.12009,E,1,08,7.2,144.1,M,-20.4,M,,*66\r\n";
+/* ----------------------------------------------------------------
+ * 共享句柄定义（声明在 app_ctx.h）
+ * ---------------------------------------------------------------- */
+gfx_menu_engine_t *s_menu      = NULL;
+lora_ctx_t        *s_lora      = NULL;
+gps_ctx_t         *s_gps       = NULL;
+bool               s_lora_ok   = false;
+uint8_t            s_time_hour = 0xFF; /* 0xFF = 未同步，显示 "--:--" */
+uint8_t            s_time_min  = 0;
+bool               s_gps_located = false;
 
-static void lcd_display_draw_pixel(void *dev, int16_t x, int16_t y, gfx_color_t color)
+/* ----------------------------------------------------------------
+ * Boot Page 配置
+ * ---------------------------------------------------------------- */
+static gfx_boot_cfg_t s_boot_cfg = {
+    .logo         = NULL,
+    .logo_w       = 0,
+    .logo_h       = 0,
+    .title        = "OTTO Wheelchair",
+    .subtitle     = "Main Board v1.0",
+    .duration_ms  = 1500,
+    .next_page_id = PAGE_MAIN,
+};
+
+/* ----------------------------------------------------------------
+ * 按键路由
+ * ---------------------------------------------------------------- */
+static void dispatch_key(const key_event_t *ev)
 {
-    lcd12864_draw_pixel((lcd12864_ctx_t *)dev, (uint8_t)x, (uint8_t)y, color);
+    uint8_t page = gfx_menu_current_page(s_menu);
+
+    if (page == PAGE_MAIN) {
+        if (ev->press == KEY_PRESS_DOWN) {
+            /* 方向键按下：发运动指令 */
+            switch (ev->dir) {
+            case KEY_DIR_UP:
+                motion_prepare(); motion_left(MOTION_F); motion_right(MOTION_F);
+                motion_send(); break;
+            case KEY_DIR_DOWN:
+                motion_prepare(); motion_left(MOTION_B); motion_right(MOTION_B);
+                motion_send(); break;
+            case KEY_DIR_LEFT:
+                motion_prepare(); motion_left(MOTION_B); motion_right(MOTION_F);
+                motion_send(); break;
+            case KEY_DIR_RIGHT:
+                motion_prepare(); motion_left(MOTION_F); motion_right(MOTION_B);
+                motion_send(); break;
+            default: break;
+            }
+        } else if (ev->press == KEY_PRESS_SHORT) {
+            if (ev->dir == KEY_DIR_CENTER) {
+                /* 中键短按（完整按下+松开）：进菜单 */
+                gfx_menu_push(s_menu, PAGE_MENU);
+            } else {
+                /* 方向键松开：停止 */
+                motion_prepare();
+                motion_send();
+            }
+        }
+        return;
+    }
+
+    if (page == PAGE_BACKREST) {
+        if (ev->press == KEY_PRESS_DOWN) {
+            if (ev->dir == KEY_DIR_UP) {
+                motion_prepare(); motion_stepper(MOTION_F); motion_send();
+            } else if (ev->dir == KEY_DIR_DOWN) {
+                motion_prepare(); motion_stepper(MOTION_B); motion_send();
+            }
+        } else if (ev->press == KEY_PRESS_SHORT) {
+            if (ev->dir == KEY_DIR_UP || ev->dir == KEY_DIR_DOWN) {
+                motion_prepare(); motion_send();
+            } else if (ev->dir == KEY_DIR_LEFT) {
+                gfx_menu_pop(s_menu);
+            }
+        }
+        return;
+    }
+
+    /* 其他页面：只响应 SHORT，上下选中，右键进入，左键返回，屏蔽中键 */
+    if (ev->press != KEY_PRESS_SHORT) return;
+    switch (ev->dir) {
+    case KEY_DIR_UP:    gfx_menu_input(s_menu, GFX_INPUT_UP);   break;
+    case KEY_DIR_DOWN:  gfx_menu_input(s_menu, GFX_INPUT_DOWN); break;
+    case KEY_DIR_RIGHT: gfx_menu_input(s_menu, GFX_INPUT_ENTER); break;
+    case KEY_DIR_LEFT:  gfx_menu_input(s_menu, GFX_INPUT_BACK);  break;
+    default: break; /* CENTER 屏蔽 */
+    }
 }
 
-static void lcd_display_fill_rect(void *dev, int16_t x, int16_t y, uint16_t w, uint16_t h, gfx_color_t color)
-{
-    lcd12864_fill_rect((lcd12864_ctx_t *)dev, (uint8_t)x, (uint8_t)y, (uint8_t)w, (uint8_t)h, color);
-}
-
-static void lcd_display_invert_rect(void *dev, int16_t x, int16_t y, uint16_t w, uint16_t h)
-{
-    lcd12864_invert_rect((lcd12864_ctx_t *)dev, (uint8_t)x, (uint8_t)y, (uint8_t)w, (uint8_t)h);
-}
-
-static void lcd_display_flush(void *dev)
-{
-    lcd12864_flush((lcd12864_ctx_t *)dev);
-}
-
-static void lcd_display_lock(void *dev)
-{
-    lcd12864_lock((lcd12864_ctx_t *)dev);
-}
-
-static void lcd_display_unlock(void *dev)
-{
-    lcd12864_unlock((lcd12864_ctx_t *)dev);
-}
-
-static uint8_t *lcd_display_get_framebuffer(void *dev)
-{
-    return lcd12864_get_framebuffer((lcd12864_ctx_t *)dev);
-}
-
-static void lcd_display_mark_dirty(void *dev, int16_t x, int16_t y, uint16_t w, uint16_t h)
-{
-    lcd12864_mark_dirty(dev, x, y, w, h);
-}
-
+/* ----------------------------------------------------------------
+ * app_main
+ * ---------------------------------------------------------------- */
 void app_main(void)
 {
-    // ---------- LCD ----------
+    ESP_LOGI(TAG, "=== OTTO Wheelchair booting ===");
+
+    /* LCD */
     lcd12864_config_t lcd_cfg = {
-        .sclk = PIN_SCLK, .sda = PIN_SDA, .rs = PIN_RS,
-        .cs = PIN_CS, .reset = PIN_RESET, .freq_hz = SPI_FREQ,
+        .sclk    = CONFIG_LCD12864_PIN_SCLK,
+        .sda     = CONFIG_LCD12864_PIN_SDA,
+        .rs      = CONFIG_LCD12864_PIN_RS,
+        .cs      = CONFIG_LCD12864_PIN_CS,
+        .reset   = CONFIG_LCD12864_PIN_RESET,
+        .freq_hz = CONFIG_LCD12864_SPI_CLOCK_HZ,
     };
-    lcd12864_ctx_t *lcd = (lcd12864_ctx_t *)lcd12864_create(&lcd_cfg);
-    if (!lcd) return;
+    lcd12864_ctx_t *lcd = lcd12864_create(&lcd_cfg);
+    if (!lcd) { ESP_LOGE(TAG, "lcd12864_create failed"); return; }
 
-    gfx_display_hal_t lcd_hal = {
-        .width       = 128,
-        .height      = 64,
-        .draw_pixel  = lcd_display_draw_pixel,
-        .fill_rect   = lcd_display_fill_rect,
-        .invert_rect = lcd_display_invert_rect,
-        .flush       = lcd_display_flush,
-        .lock        = lcd_display_lock,
-        .unlock      = lcd_display_unlock,
-        .get_framebuffer = lcd_display_get_framebuffer,
-        .mark_dirty  = lcd_display_mark_dirty,
-    };
+    gfx_ui_ctx_t *ui = lcd_hal_create(lcd);
+    if (!ui)  { ESP_LOGE(TAG, "lcd_hal_create failed"); return; }
 
-    gfx_ui_ctx_t *ui = gfx_ui_create(&lcd_hal, lcd);
-    if (!ui) {
-        lcd12864_deinit(lcd);
-        return;
+    /* Menu Engine */
+    s_menu = gfx_menu_create(ui);
+    if (!s_menu) { ESP_LOGE(TAG, "gfx_menu_create failed"); return; }
+
+    /* 注册页面 */
+    gfx_page_desc_t boot_desc;
+    gfx_page_boot_init(&boot_desc, &s_boot_cfg);
+    gfx_menu_register_page(s_menu, PAGE_BOOT, &boot_desc);
+
+    page_main_register(s_menu);
+    page_menu_register(s_menu);
+    page_backrest_register(s_menu);
+    page_pressure_register(s_menu);
+    page_lora_cfg_register(s_menu);
+
+    /* Motion */
+    if (motion_init(CONFIG_MOTION_I2C_PORT,
+                    CONFIG_MOTION_SDA_PIN,
+                    CONFIG_MOTION_SCL_PIN) != ESP_OK) {
+        ESP_LOGE(TAG, "motion_init failed"); return;
     }
+    motion_prepare();
+    motion_send();
 
-    // ---------- UART + LoRa 实例化 ----------
-    uart_bus_config_t uart_cfg = {
-        .uart_num  = LORA_UART_NUM,
-        .txd_pin   = LORA_TX_PIN,
-        .rxd_pin   = LORA_RX_PIN,
-        .baud_rate = LORA_BAUD,
+    /* Buzzer */
+    buzzer_init(CONFIG_BUZZER_GPIO_PIN);
+
+    /* LD2402 */
+    ld2402_io_init(-1);
+
+    /* GPS */
+    uart_bus_config_t gps_uart_cfg = {
+        .uart_num  = CONFIG_GPS_UART_NUM,
+        .txd_pin   = CONFIG_GPS_TX_PIN,
+        .rxd_pin   = CONFIG_GPS_RX_PIN,
+        .baud_rate = CONFIG_GPS_BAUD,
     };
-    uart_bus_handle_t bus = uart_bus_init(&uart_cfg);
-    if (bus < 0) {
-        gfx_ui_lock(ui);
-        gfx_ui_clear_rect(ui, 0, 0, 128, 64);
-        gfx_ui_draw_string(ui, 0, 0, "UART FAIL", &gfx_font_5x8_spleen, GFX_COLOR_WHITE, true);
-        gfx_ui_flush(ui);
-        gfx_ui_unlock(ui);
-        gfx_ui_destroy(ui);
-        lcd12864_deinit(lcd);
-        return;
-    }
+    uart_bus_handle_t gps_bus = uart_bus_init(&gps_uart_cfg);
+    gps_config_t gps_cfg = { .uart = gps_uart_cfg };
+    s_gps = gps_create(&gps_cfg, gps_bus);
+    if (!s_gps) ESP_LOGW(TAG, "gps_create failed, GPS disabled");
 
+    /* LoRa */
+    uart_bus_config_t lora_uart_cfg = {
+        .uart_num  = CONFIG_LORA_UART_NUM,
+        .txd_pin   = CONFIG_LORA_TX_PIN,
+        .rxd_pin   = CONFIG_LORA_RX_PIN,
+        .baud_rate = CONFIG_LORA_BAUD,
+    };
+    uart_bus_handle_t lora_bus = uart_bus_init(&lora_uart_cfg);
     lora_config_t lora_cfg = {
-        .aux_pin = LORA_AUX_PIN,
-        .uart    = uart_cfg,
+        .aux_pin = CONFIG_LORA_AUX_PIN,
+        .uart    = lora_uart_cfg,
         .drssi   = false,
     };
-    lora_ctx_t *lora = lora_create(&lora_cfg, bus);
-
-    gfx_ui_lock(ui);
-    gfx_ui_clear_rect(ui, 0, 0, 128, 64);
-    if (lora) {
-        gfx_ui_draw_string(ui, 0, 0, "LoRa TX GPRMC", &gfx_font_5x8_spleen, GFX_COLOR_WHITE, true);
-        gfx_ui_draw_string(ui, 0, 2, "Every 1s", &gfx_font_5x8_spleen, GFX_COLOR_WHITE, true);
-    } else {
-        gfx_ui_draw_string(ui, 0, 0, "LoRa Init FAIL", &gfx_font_5x8_spleen, GFX_COLOR_WHITE, true);
-    }
-    gfx_ui_flush(ui);
-    gfx_ui_unlock(ui);
-
-    if (!lora) {
-        gfx_ui_destroy(ui);
-        lcd12864_deinit(lcd);
-        return;
+    s_lora = lora_create(&lora_cfg, lora_bus);
+    s_lora_ok = (s_lora != NULL);
+    if (!s_lora_ok) ESP_LOGW(TAG, "lora_create failed, LoRa disabled");
+    key_config_t key_cfg = {
+        .gpio_up     = CONFIG_BUTTON_GPIO_UP,
+        .gpio_down   = CONFIG_BUTTON_GPIO_DOWN,
+        .gpio_left   = CONFIG_BUTTON_GPIO_LEFT,
+        .gpio_right  = CONFIG_BUTTON_GPIO_RIGHT,
+        .gpio_center = CONFIG_BUTTON_GPIO_CENTER,
+    };
+    if (key_init(&key_cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "key_init failed"); return;
     }
 
-    // ---------- 周期发送 ----------
-    const uint8_t *payload = (const uint8_t *)GPS_GPRMC_SENTENCE;
-    uint8_t payload_len = (uint8_t)strlen(GPS_GPRMC_SENTENCE);
+    /* 启动 */
+    gfx_menu_push(s_menu, PAGE_BOOT);
+    ESP_LOGI(TAG, "boot complete");
 
+    /* 主循环 */
+    key_event_t ev;
+    gps_data_t  gps_data;
     while (1) {
-        (void)lora_send(lora, payload, payload_len);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        gfx_menu_tick(s_menu);
+
+        /* GPS 轮询：有新帧就尝试同步时间 */
+        if (s_gps && gps_read(s_gps, &gps_data) == ESP_OK) {
+            if (gps_is_located(&gps_data)) {
+                s_time_hour   = gps_data.hour;
+                s_time_min    = gps_data.minute;
+                s_gps_located = true;
+            }
+        }
+
+        if (key_read(&ev)) {
+            dispatch_key(&ev);
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 }

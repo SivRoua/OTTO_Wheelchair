@@ -20,7 +20,7 @@ static QueueHandle_t s_key_queue = NULL;
  * 每个按键 × 3 种按压类型 = 15 个回调数据槽。
  * 必须是静态存储，因为 iot_button 持有指向 usr_data 的指针。
  */
-static key_cb_data_t s_cb_data[KEY_DIR_MAX][3];
+static key_cb_data_t s_cb_data[KEY_DIR_MAX][KEY_PRESS_MAX];
 
 /* ---------- 统一回调：写入队列 ---------- */
 static void key_event_cb(void *btn_handle, void *usr_data) {
@@ -54,11 +54,15 @@ static esp_err_t register_button(key_dir_t dir, int gpio_num,
     iot_button_register_cb(handle, BUTTON_LONG_PRESS_START, NULL,
                            key_event_cb, &s_cb_data[dir][KEY_PRESS_LONG]);
 
-    /* 长按持续：按住期间以 LONG_PRESS_HOLD_SERIAL_TIME_MS 为间隔周期触发
-     * UP/DOWN 用于列表滚动，其他方向用于电机持续控制 */
+    /* 长按持续：按住期间以 LONG_PRESS_HOLD_SERIAL_TIME_MS 为间隔周期触发 */
     s_cb_data[dir][KEY_PRESS_HOLD] = (key_cb_data_t){ dir, KEY_PRESS_HOLD };
     iot_button_register_cb(handle, BUTTON_LONG_PRESS_HOLD, NULL,
                            key_event_cb, &s_cb_data[dir][KEY_PRESS_HOLD]);
+
+    /* 按下瞬间触发 */
+    s_cb_data[dir][KEY_PRESS_DOWN] = (key_cb_data_t){ dir, KEY_PRESS_DOWN };
+    iot_button_register_cb(handle, BUTTON_PRESS_DOWN, NULL,
+                           key_event_cb, &s_cb_data[dir][KEY_PRESS_DOWN]);
 
     return ESP_OK;
 }

@@ -1,1 +1,27 @@
-# Kconfig — 占位文件
+menu "LoRa Module"
+
+    config LORA_UART_NUM
+        int "UART port number"
+        range 0 2
+        default 1
+
+    config LORA_TX_PIN
+        int "TX GPIO pin"
+        range 0 48
+        default 17
+
+    config LORA_RX_PIN
+        int "RX GPIO pin"
+        range 0 48
+        default 18
+
+    config LORA_AUX_PIN
+        int "AUX GPIO pin"
+        range 0 48
+        default 19
+
+    config LORA_BAUD
+        int "Baud rate"
+        default 9600
+
+endmenu

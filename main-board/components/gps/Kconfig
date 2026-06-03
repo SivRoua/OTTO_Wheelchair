@@ -1,1 +1,22 @@
-# Kconfig — 占位文件
+menu "GPS Module"
+
+    config GPS_UART_NUM
+        int "UART port number"
+        range 0 2
+        default 2
+
+    config GPS_TX_PIN
+        int "TX GPIO pin"
+        range 0 48
+        default 20
+
+    config GPS_RX_PIN
+        int "RX GPIO pin"
+        range 0 48
+        default 21
+
+    config GPS_BAUD
+        int "Baud rate"
+        default 9600
+
+endmenu
