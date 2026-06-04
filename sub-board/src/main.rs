@@ -72,14 +72,12 @@ fn main() -> ! {
     loop {
         match protocol.next_command() {
             Ok(cmd) => {
+                led.toggle();
                 motors.apply(&cmd);
             }
             Err(()) => {
                 motors.stop_all();
             }
         }
-        led.set_low();
-        delay.delay_ms(30u32);
-        led.set_high();
     }
 }
