@@ -1,0 +1,11 @@
+menu "LD2402 Radar Sensor"
+
+    config LD2402_IO_PIN
+        int "IO output GPIO pin"
+        range 0 48
+        default 2
+        help
+            GPIO pin connected to the LD2402 IO output.
+            High = person detected, Low = no person.
+
+endmenu
